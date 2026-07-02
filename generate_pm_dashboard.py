@@ -126,15 +126,17 @@ for r in range(4, 14):
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_bd
         if c == 3:
-            cell.fill = fill(GREEN_LT if not cell.value else "FFFFFF")
+            cell.fill = fill(GREEN_LT)
 
-ws_cfg["A16"] = "※ 담당자는 최대 10명까지(C4~C13). 이름을 바꾸면 업무목록 드롭다운과 대시보드에 바로 반영됩니다."
+ws_cfg["A16"] = "※ 담당자는 초록색 칸(C4~C13)에 위에서부터 빈칸 없이 최대 10명까지 입력하세요. 바꾸면 드롭다운과 대시보드에 바로 반영됩니다."
 ws_cfg["A16"].font = f(9, color=MUTED)
 
+# MemberList는 OFFSET 동적 범위: 빈 셀이 목록에 섞이면 Excel이 '공백 무시'와
+# 결합해 아무 값이나 통과시키므로, 채워진 셀 수만큼만 범위를 잡는다.
 for name, ref in [
     ("StatusList", "설정!$A$4:$A$6"),
     ("PriorityList", "설정!$B$4:$B$6"),
-    ("MemberList", "설정!$C$4:$C$13"),
+    ("MemberList", "OFFSET(설정!$C$4,0,0,MAX(1,COUNTA(설정!$C$4:$C$13)),1)"),
 ]:
     wb.defined_names[name] = DefinedName(name, attr_text=ref)
 
@@ -284,7 +286,8 @@ KB = [("B", "To Do", MUTED, GRAY_LT, BASE, INK),
       ("F", "Done", GREEN, GREEN_LT, GREEN_MD, INK2)]
 for col, st, head_fill, card_fill, card_bd, card_ink in KB:
     h = ws_kanban[f"{col}4"]
-    h.value = f'="{st}  ("&COUNTIF(업무목록!$F$2:$F${LAST},"{st}")&"건)"'
+    h.value = (f'="{st}  ("&COUNTIFS(업무목록!$B$2:$B${LAST},"<>",'
+               f'업무목록!$F$2:$F${LAST},"{st}")&"건)"')
     h.font = f(11, True, "FFFFFF")
     h.fill = fill(head_fill)
     h.alignment = Alignment(horizontal="center", vertical="center")
@@ -326,12 +329,21 @@ ws_dash["L1"].number_format = "yyyy-mm-dd"
 ws_dash["L1"].font = f(10, True, INK2)
 ws_dash["L1"].alignment = Alignment(horizontal="center", vertical="center")
 
+# 모든 집계는 '업무명(B)이 있는 행' 기준으로 통일한다 — 업무명만 지우고
+# 상태가 남은 행이 있어도 완료율이 100%를 넘거나 합계가 어긋나지 않도록.
 TOTAL = f'COUNTIF(업무목록!$B$2:$B${LAST},"<>")'
-DONE = f'COUNTIF(업무목록!$F$2:$F${LAST},"Done")'
+
+
+def cnt_status(st):
+    return (f'COUNTIFS(업무목록!$B$2:$B${LAST},"<>",'
+            f'업무목록!$F$2:$F${LAST},"{st}")')
+
+
+DONE = cnt_status("Done")
 TILES = [
     (2, "전체 업무", f"={TOTAL}", "0", INK),
-    (4, "To Do", f'=COUNTIF(업무목록!$F$2:$F${LAST},"To Do")', "0", INK2),
-    (6, "Doing", f'=COUNTIF(업무목록!$F$2:$F${LAST},"Doing")', "0", BLUE),
+    (4, "To Do", f"={cnt_status('To Do')}", "0", INK2),
+    (6, "Doing", f"={cnt_status('Doing')}", "0", BLUE),
     (8, "Done", f"={DONE}", "0", GREEN_TX),
     (10, "완료율", f"=IFERROR({DONE}/{TOTAL},0)", "0%", BLUE_DK),
     (12, "지연 업무", f'=COUNTIFS(업무목록!$B$2:$B${LAST},"<>",'
@@ -374,7 +386,8 @@ table_header(ws_dash, 8, 2, ["상태", "건수"])
 for i, st in enumerate(STATUS):
     r = 9 + i
     ws_dash.cell(row=r, column=2, value=st)
-    ws_dash.cell(row=r, column=3, value=f'=COUNTIF(업무목록!$F$2:$F${LAST},$B{r})')
+    ws_dash.cell(row=r, column=3, value=(
+        f'=COUNTIFS(업무목록!$B$2:$B${LAST},"<>",업무목록!$F$2:$F${LAST},$B{r})'))
     for c in (2, 3):
         cell = ws_dash.cell(row=r, column=c)
         cell.font = f(10)
@@ -386,7 +399,8 @@ table_header(ws_dash, 8, 5, ["우선순위", "건수"])
 for i, p in enumerate(PRIORITY):
     r = 9 + i
     ws_dash.cell(row=r, column=5, value=p)
-    ws_dash.cell(row=r, column=6, value=f'=COUNTIF(업무목록!$E$2:$E${LAST},$E{r})')
+    ws_dash.cell(row=r, column=6, value=(
+        f'=COUNTIFS(업무목록!$B$2:$B${LAST},"<>",업무목록!$E$2:$E${LAST},$E{r})'))
     for c in (5, 6):
         cell = ws_dash.cell(row=r, column=c)
         cell.font = f(10)
@@ -400,7 +414,8 @@ for i in range(10):
     ws_dash.cell(row=r, column=8, value=f'=IF(설정!$C{4 + i}="","",설정!$C{4 + i})')
     for j, st in enumerate(STATUS):
         ws_dash.cell(row=r, column=9 + j, value=(
-            f'=IF($H{r}="","",COUNTIFS(업무목록!$D$2:$D${LAST},$H{r},'
+            f'=IF($H{r}="","",COUNTIFS(업무목록!$B$2:$B${LAST},"<>",'
+            f'업무목록!$D$2:$D${LAST},$H{r},'
             f'업무목록!$F$2:$F${LAST},"{st}"))'))
     ws_dash.cell(row=r, column=12, value=f'=IF($H{r}="","",$I{r}+$J{r}+$K{r})')
     ws_dash.cell(row=r, column=13, value=f'=IF($H{r}="","",IF($L{r}=0,"—",$K{r}/$L{r}))')
@@ -440,7 +455,7 @@ s.data_points = [DataPoint(idx=i, spPr=GraphicalProperties(solidFill=c))
                  for i, c in enumerate(STATUS_COLORS)]
 bar.width = 8
 bar.height = 6.5
-ws_dash.add_chart(bar, "B14")
+ws_dash.add_chart(bar, "B20")  # 담당자별 표(H8:M18)를 가리지 않도록 20행부터
 
 dough = DoughnutChart()
 dough.title = "우선순위 분포"
@@ -455,7 +470,7 @@ s.data_points = [DataPoint(idx=i, spPr=GraphicalProperties(solidFill=c))
                  for i, c in enumerate([RED, AMBER, MUTED])]
 dough.width = 8
 dough.height = 6.5
-ws_dash.add_chart(dough, "F14")
+ws_dash.add_chart(dough, "F20")
 
 stack = BarChart()
 stack.type = "bar"
@@ -473,7 +488,7 @@ if stack.legend:
 stack.gapWidth = 40
 stack.width = 12
 stack.height = 6.5
-ws_dash.add_chart(stack, "J14")
+ws_dash.add_chart(stack, "J20")
 
 # ═══════════════════════════════ 사용법 ═══════════════════════════════
 ws_help.sheet_view.showGridLines = False
@@ -501,17 +516,19 @@ LINES = [
     ("   '상태' 열 드롭다운에서 To Do → Doing → Done 으로 바꾸면 칸반보드와 대시보드에 즉시 반영됩니다.", 10, False, INK),
     ("", 10, False, INK),
     ("■ 자동 표시 규칙", 12, True, INK),
-    ("   · 마감일이 지났는데 Done이 아닌 업무 → 행 전체가 붉게 표시되고 D-Day에 '⚠ n일 지연'", 10, False, INK),
+    ("   · 마감일이 지났는데 Done이 아닌 업무 → 행이 붉게 표시되고(상태·우선순위 칩은 원래 색 유지) D-Day에 '⚠ n일 지연'", 10, False, INK),
     ("   · 오늘이 마감일 → '🔔 오늘 마감'", 10, False, INK),
     ("   · 완료(Done)된 업무 → 글자가 회색 처리", 10, False, INK),
     ("   · 우선순위 '높음' → 빨간색 강조, 칸반 카드에 🔺 표시", 10, False, INK),
     ("", 10, False, INK),
     ("■ 담당자 목록 수정 (설정 시트)", 12, True, INK),
-    ("   초록색 담당자 칸(C4~C13)에서 이름을 바꾸거나 추가하세요. 최대 10명까지 가능합니다.", 10, False, INK),
+    ("   초록색 담당자 칸(C4~C13)에 위에서부터 빈칸 없이 이름을 입력하세요. 최대 10명까지 가능합니다.", 10, False, INK),
     ("   상태(To Do/Doing/Done)와 우선순위(높음/중간/낮음) 목록은 수식과 연결되어 있으니 바꾸지 마세요.", 10, False, RED),
     ("", 10, False, INK),
     ("■ 알아두면 좋은 점", 12, True, INK),
-    (f"   · 업무는 {N_ROWS}행까지 서식과 자동 수식이 미리 적용되어 있습니다. 더 필요하면 마지막 행을 복사해 아래로 붙여넣으세요.", 10, False, INK),
+    (f"   · 업무는 {N_ROWS}건(2~{LAST}행)까지 지원합니다. 그 아래({LAST + 1}행부터)에 입력하면 대시보드·칸반에 반영되지 않으니 주의하세요.", 10, False, RED),
+    ("   · 새 업무는 목록 끝의 빈 행에 이어서 입력하세요. 중간에 행을 삽입했다면 바로 위 행 전체를 복사해", 10, False, INK),
+    ("     삽입한 행에 붙여넣으세요(숨겨진 자동 수식이 함께 복사됩니다). 안 하면 칸반보드에서 그 업무가 빠질 수 있습니다.", 10, False, INK),
     (f"   · 칸반보드는 각 열에서 위에서부터 {KANBAN_SLOTS}개까지 표시합니다.", 10, False, INK),
     ("   · D-Day와 지연 표시는 파일을 여는 시점의 '오늘' 날짜 기준으로 자동 계산됩니다.", 10, False, INK),
     ("   · 처음에 들어 있는 예시 업무 12건은 자유롭게 지우고 사용하세요.", 10, False, INK),
